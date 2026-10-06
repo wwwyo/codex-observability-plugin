@@ -215,6 +215,7 @@ export type Turn = {
   promptSkills: string[];
   completed: boolean;
   aborted: boolean;
+  /** Turn-local delta of the session's cumulative token counters. */
   totalUsage?: TokenUsage;
   systemPrompt?: SystemPrompt;
   userImages: string[];

@@ -429,10 +429,8 @@ function buildTurnSummary(turn: Turn) {
     toolNames[name] = (toolNames[name] ?? 0) + 1;
   }
   const usageByModel: Record<string, Record<string, number>> = Object.create(null);
-  for (const step of turn.steps) {
-    if (!toUsageDetails(step.usage) || !step.usage) continue;
-    const usage = step.usage;
-    const model = step.model ?? turn.model ?? "unknown";
+  const addUsage = (model: string, usage: TokenUsage | undefined): boolean => {
+    if (!usage || !toUsageDetails(usage)) return false;
     const totals = (usageByModel[model] ??= Object.create(null));
     const fields = {
       input_tokens: "input",
@@ -445,6 +443,17 @@ function buildTurnSummary(turn: Turn) {
       const value = usage[source as keyof TokenUsage];
       if (typeof value === "number") totals[target] = (totals[target] ?? 0) + value;
     }
+    return true;
+  };
+  let hasStepUsage = false;
+  for (const step of turn.steps) {
+    hasStepUsage = addUsage(step.model ?? turn.model ?? "unknown", step.usage) || hasStepUsage;
+  }
+  if (!hasStepUsage) {
+    const models = new Set(turn.steps.map((step) => step.model ?? turn.model ?? "unknown"));
+    // Aggregate-only usage cannot be attributed to individual models in a mixed turn.
+    const model = models.size > 1 ? "unknown" : ([...models][0] ?? turn.model ?? "unknown");
+    addUsage(model, turn.totalUsage);
   }
   return {
     version: 1,
