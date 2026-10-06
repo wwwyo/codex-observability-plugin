@@ -65,10 +65,25 @@ The remaining options are settable both ways, as a `langfuse.json` key or as the
 - `metadata` attaches a JSON object to every trace.
 - `skill_tags` tags traces with `skill:<name>` for every skill invoked in the turn, and defaults to `true`.
 - `trace_seed` derives deterministic trace ids, so a headless caller knows a run's trace id up front. Use a unique seed per session.
+- `detail` selects `full` (default) or `turn`, with `LANGFUSE_CODEX_DETAIL` as the environment override.
 - `debug` logs verbosely to stderr, and defaults to `false`.
 - `fail_on_error` fails the hook on upload errors instead of failing open, and defaults to `false`.
 
 Everything the plugin traces is uploaded to Langfuse, including prompts and tool inputs and outputs, so do not enable it for sessions containing data you do not want stored there.
+
+### Turn detail
+
+Set `"detail": "turn"` in `~/.codex/langfuse.json` (without `enabled`) to
+use one observation per turn while preserving per-project opt-in. Override with
+`"detail": "full"` per project, or `LANGFUSE_CODEX_DETAIL=full`, for individual
+model and tool observations.
+
+Turn mode preserves the user input and final response, turn timing, context,
+subagent turns, and a versioned `telemetry_summary` JSON value in turn metadata.
+The summary contains generation/tool counts, tool names, bounded tool error
+messages and times, and token usage grouped by model. It does not contain tool
+input/output bodies or intermediate model responses. Individual generation cost
+and latency views require full mode. Previously uploaded turns are not replayed.
 
 ## Contributing
 

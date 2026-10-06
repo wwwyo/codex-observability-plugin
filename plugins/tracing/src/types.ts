@@ -194,6 +194,7 @@ export type ToolCall = {
 export type ModelStep = {
   startTime: number;
   endTime: number;
+  model?: string;
   reasoning?: string;
   text?: string;
   toolCalls: ToolCall[];
