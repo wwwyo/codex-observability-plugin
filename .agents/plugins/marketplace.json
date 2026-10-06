@@ -1,14 +1,15 @@
 {
   "name": "codex-observability-plugin",
   "interface": {
-    "displayName": "Langfuse"
+    "displayName": "Langfuse (wwwyo fork)"
   },
   "plugins": [
     {
       "name": "tracing",
       "source": {
         "source": "npm",
-        "package": "@langfuse/codex-observability-plugin"
+        "package": "@wwwyo/codex-observability-plugin",
+        "version": "0.4.1"
       },
       "policy": {
         "installation": "AVAILABLE",

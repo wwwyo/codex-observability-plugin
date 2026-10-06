@@ -3,9 +3,9 @@
 This repository is [wwwyo's fork](https://github.com/wwwyo/codex-observability-plugin)
 of [langfuse/codex-observability-plugin](https://github.com/langfuse/codex-observability-plugin).
 It contains custom compact turn tracing and tool-error handling changes for personal
-use; these changes are not part of the upstream release. The marketplace metadata
-still refers to the official npm package, so using this fork's changes requires
-building its source rather than installing that package.
+use; these changes are not part of the upstream release. This fork is distributed
+as `@wwwyo/codex-observability-plugin`, with the built hook included in the npm
+package. Generated bundles are not committed to Git.
 
 Codex plugin that sends OpenAI Codex session telemetry to Langfuse. It traces agent turns, model generations, reasoning summaries, system prompts, tool calls, images, subagent threads, skills, and token usage.
 
@@ -16,7 +16,16 @@ Langfuse also documents this integration on the [Codex integration page](https:/
 Add the plugin marketplace:
 
 ```bash
-codex plugin marketplace add langfuse/codex-observability-plugin
+codex plugin marketplace add wwwyo/codex-observability-plugin --ref main
+codex plugin add tracing@codex-observability-plugin
+```
+
+The marketplace pins this fork's npm package version. After a new release, refresh
+the registered marketplace and install the updated plugin:
+
+```bash
+codex plugin marketplace upgrade codex-observability-plugin
+codex plugin add tracing@codex-observability-plugin
 ```
 
 Then enable hooks and the plugin in `~/.codex/config.toml`, or only for one project in `<project>/.codex/config.toml`:

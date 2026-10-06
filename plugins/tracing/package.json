@@ -1,19 +1,19 @@
 {
-  "name": "@langfuse/codex-observability-plugin",
-  "version": "0.4.0",
-  "description": "Langfuse observability plugin for the OpenAI Codex coding agent for tracing prompts, agent turns, model generations, and tool calls.",
+  "name": "@wwwyo/codex-observability-plugin",
+  "version": "0.4.1",
+  "description": "Personal Langfuse Codex plugin fork with optional compact turn tracing.",
   "license": "MIT",
   "author": "Langfuse",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/langfuse/codex-observability-plugin.git",
+    "url": "git+https://github.com/wwwyo/codex-observability-plugin.git",
     "directory": "plugins/tracing"
   },
   "bugs": {
-    "url": "https://github.com/langfuse/codex-observability-plugin/issues"
+    "url": "https://github.com/wwwyo/codex-observability-plugin/issues"
   },
-  "homepage": "https://github.com/langfuse/codex-observability-plugin#readme",
+  "homepage": "https://github.com/wwwyo/codex-observability-plugin#readme",
   "keywords": [
     "codex",
     "codex-plugin",
@@ -26,12 +26,23 @@
   "files": [
     ".codex-plugin",
     "hooks",
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "prepack": "pnpm -w run build"
+    "prepack": "npm --prefix ../.. run build && cp ../../README.md ../../LICENSE ."
   },
   "engines": {
     "node": ">=22"
+  },
+  "contributors": [
+    {
+      "name": "wwwyo",
+      "url": "https://github.com/wwwyo"
+    }
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }
