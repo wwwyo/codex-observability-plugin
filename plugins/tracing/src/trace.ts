@@ -421,7 +421,7 @@ function generationEnd(step: ModelStep): number {
   return Math.max(step.startTime, Math.min(firstToolCall ?? step.endTime, step.endTime));
 }
 
-function turnSummary(turn: Turn) {
+function buildTurnSummary(turn: Turn) {
   const tools = turn.steps.flatMap((step) => step.toolCalls);
   const toolNames: Record<string, number> = Object.create(null);
   for (const tc of tools) {
@@ -492,7 +492,7 @@ async function emitTurn(
       statusMessage: turn.aborted ? "Turn interrupted by user" : undefined,
       metadata: {
         ...(ctx.config.detail === "turn"
-          ? { telemetry_summary: JSON.stringify(turnSummary(turn)) }
+          ? { telemetry_summary: JSON.stringify(buildTurnSummary(turn)) }
           : {}),
         "codex.turn_id": turn.turnId,
         "codex.thread_id": sessionMeta.sessionId,
