@@ -34858,11 +34858,15 @@ function parseSession(lines) {
 		return {
 			startTime,
 			endTime: startTime,
+			model: turn?.model,
 			toolCalls: []
 		};
 	}
 	const ensureTurn = (ts) => turn ??= newTurn(ts);
 	const ensureStep = (ts) => step ??= newStep(ts);
+	const recordStepModel = (model) => {
+		if (step && !step.model) step.model = model;
+	};
 	const recordSubagentThread = (threadId) => {
 		if (!turn.subagentThreadIds.includes(threadId)) turn.subagentThreadIds.push(threadId);
 	};
@@ -34898,6 +34902,7 @@ function parseSession(lines) {
 			const t = ensureTurn(ts);
 			const p = line.payload;
 			t.model = p.model ?? t.model;
+			recordStepModel(t.model);
 			const effort = typeof p.effort === "string" ? p.effort : p.reasoning_effort;
 			if (typeof effort === "string") t.reasoningEffort = effort;
 			t.invocationParams = line.payload;
@@ -35388,7 +35393,7 @@ function turnSummary(turn) {
 	for (const step of turn.steps) {
 		if (!toUsageDetails(step.usage) || !step.usage) continue;
 		const usage = step.usage;
-		const model = turn.model ?? "unknown";
+		const model = step.model ?? turn.model ?? "unknown";
 		const totals = usageByModel[model] ??= Object.create(null);
 		for (const [source, target] of Object.entries({
 			input_tokens: "input",
@@ -35456,7 +35461,7 @@ async function emitTurn(turn, sessionMeta, ctx) {
 			const generation = startObservation(isSubagent ? "LLM Subagent" : "LLM", {
 				input: attachToolDefinitions(generationInput(systemMessage, historyPrefix, turn, i), turn.toolDefinitions),
 				output: buildGenerationOutput(step),
-				model: turn.model,
+				model: step.model ?? turn.model,
 				...turn.reasoningEffort ? { modelParameters: { reasoning_effort: turn.reasoningEffort } } : {},
 				usageDetails: toUsageDetails(step.usage),
 				metadata: {

@@ -432,7 +432,7 @@ function turnSummary(turn: Turn) {
   for (const step of turn.steps) {
     if (!toUsageDetails(step.usage) || !step.usage) continue;
     const usage = step.usage;
-    const model = turn.model ?? "unknown";
+    const model = step.model ?? turn.model ?? "unknown";
     const totals = (usageByModel[model] ??= Object.create(null));
     const fields = {
       input_tokens: "input",
@@ -542,7 +542,7 @@ async function emitTurn(
             turn.toolDefinitions,
           ),
           output: buildGenerationOutput(step),
-          model: turn.model,
+          model: step.model ?? turn.model,
           ...(turn.reasoningEffort
             ? { modelParameters: { reasoning_effort: turn.reasoningEffort } }
             : {}),

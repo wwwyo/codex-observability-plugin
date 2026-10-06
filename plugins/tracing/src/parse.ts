@@ -188,11 +188,14 @@ export function parseSession(lines: RolloutLine[]): {
   };
 
   function newStep(startTime: number): ModelStep {
-    return { startTime, endTime: startTime, toolCalls: [] };
+    return { startTime, endTime: startTime, model: turn?.model, toolCalls: [] };
   }
 
   const ensureTurn = (ts: number): MutableTurn => (turn ??= newTurn(ts));
   const ensureStep = (ts: number) => (step ??= newStep(ts));
+  const recordStepModel = (model: string | undefined) => {
+    if (step && !step.model) step.model = model;
+  };
 
   const recordSubagentThread = (threadId: string) => {
     if (!turn!.subagentThreadIds.includes(threadId)) {
@@ -243,6 +246,7 @@ export function parseSession(lines: RolloutLine[]): {
       const t = ensureTurn(ts);
       const p = line.payload as TurnContextPayload;
       t.model = p.model ?? t.model;
+      recordStepModel(t.model);
       const effort = typeof p.effort === "string" ? p.effort : p.reasoning_effort;
       if (typeof effort === "string") t.reasoningEffort = effort;
       t.invocationParams = line.payload as Record<string, unknown>;
