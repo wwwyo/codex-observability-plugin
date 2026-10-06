@@ -8,8 +8,7 @@ node_modules/
 # Local debugging
 debug.log
 
-# Build output
-plugins/tracing/dist/
+# The fork ships the generated hook for Git marketplace installation.
 
 # Claude Code scratch space; globbed so a later `!` negation works.
 .claude/*

@@ -77,3 +77,23 @@ See the [contributing guide](./CONTRIBUTING.md).
 ## License
 
 [MIT](./LICENSE)
+
+## wwwyo fork: turn detail
+
+Set `"detail": "turn"` in `~/.codex/langfuse.json` (without `enabled`) to
+use one observation per turn while preserving per-project opt-in. Override with
+`"detail": "full"` per project, or `LANGFUSE_CODEX_DETAIL=full`, for individual
+model and tool observations. The default remains `full`.
+
+Turn mode preserves the user input and final response, turn timing, context,
+subagent turns, and a versioned `telemetry_summary` JSON value in turn metadata.
+The summary contains generation/tool counts, tool names, bounded tool error
+messages and times, and token usage grouped by model. It does not contain tool
+input/output bodies or intermediate model responses. Individual generation cost
+and latency views require full mode. Previously uploaded turns are not replayed.
+
+This fork's marketplace installs the plugin from Git instead of the upstream npm
+package. The generated `plugins/tracing/dist/index.mjs` is committed for that
+installation path. Run `pnpm build` after source edits and include the rebuilt
+bundle with the source change. Both plugin version fields must be bumped when
+publishing changes so installed copies refresh.
