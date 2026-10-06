@@ -421,6 +421,56 @@ function generationEnd(step: ModelStep): number {
   return Math.max(step.startTime, Math.min(firstToolCall ?? step.endTime, step.endTime));
 }
 
+function buildTurnSummary(turn: Turn) {
+  const tools = turn.steps.flatMap((step) => step.toolCalls);
+  const toolNames: Record<string, number> = Object.create(null);
+  for (const tc of tools) {
+    const name = toolObservationName(tc);
+    toolNames[name] = (toolNames[name] ?? 0) + 1;
+  }
+  const usageByModel: Record<string, Record<string, number>> = Object.create(null);
+  const addUsage = (model: string, usage: TokenUsage | undefined): boolean => {
+    if (!usage || !toUsageDetails(usage)) return false;
+    const totals = (usageByModel[model] ??= Object.create(null));
+    const fields = {
+      input_tokens: "input",
+      output_tokens: "output",
+      total_tokens: "total",
+      cached_input_tokens: "cache_read_input_tokens",
+      reasoning_output_tokens: "reasoning_output_tokens",
+    };
+    for (const [source, target] of Object.entries(fields)) {
+      const value = usage[source as keyof TokenUsage];
+      if (typeof value === "number") totals[target] = (totals[target] ?? 0) + value;
+    }
+    return true;
+  };
+  let hasStepUsage = false;
+  for (const step of turn.steps) {
+    hasStepUsage = addUsage(step.model ?? turn.model ?? "unknown", step.usage) || hasStepUsage;
+  }
+  if (!hasStepUsage) {
+    const models = new Set(turn.steps.map((step) => step.model ?? turn.model ?? "unknown"));
+    // Aggregate-only usage cannot be attributed to individual models in a mixed turn.
+    const model = models.size > 1 ? "unknown" : ([...models][0] ?? turn.model ?? "unknown");
+    addUsage(model, turn.totalUsage);
+  }
+  return {
+    version: 1,
+    generation_count: turn.steps.length,
+    tool_call_count: tools.length,
+    tool_names: toolNames,
+    errors: tools
+      .filter((tc) => tc.error)
+      .map((tc) => ({
+        name: toolObservationName(tc),
+        status_message: tc.error!.slice(0, 300),
+        start_time: new Date(tc.startTime).toISOString(),
+      })),
+    usage_by_model: usageByModel,
+  };
+}
+
 async function emitTurn(
   turn: Turn,
   sessionMeta: SessionMeta,
@@ -450,6 +500,9 @@ async function emitTurn(
       level: turn.aborted ? "WARNING" : undefined,
       statusMessage: turn.aborted ? "Turn interrupted by user" : undefined,
       metadata: {
+        ...(ctx.config.detail === "turn"
+          ? { telemetry_summary: JSON.stringify(buildTurnSummary(turn)) }
+          : {}),
         "codex.turn_id": turn.turnId,
         "codex.thread_id": sessionMeta.sessionId,
         "codex.model": turn.model,
@@ -484,10 +537,11 @@ async function emitTurn(
 
   let failure: unknown;
   try {
-    const systemMessage = systemPromptText(turn.systemPrompt);
+    const systemMessage =
+      ctx.config.detail === "turn" ? undefined : systemPromptText(turn.systemPrompt);
     const historyPrefix = ctx.historyPrefix ?? [];
 
-    for (let i = 0; i < turn.steps.length; i++) {
+    for (let i = 0; ctx.config.detail !== "turn" && i < turn.steps.length; i++) {
       const step = turn.steps[i];
       const generation = startObservation(
         isSubagent ? "LLM Subagent" : "LLM",
@@ -497,7 +551,7 @@ async function emitTurn(
             turn.toolDefinitions,
           ),
           output: buildGenerationOutput(step),
-          model: turn.model,
+          model: step.model ?? turn.model,
           ...(turn.reasoningEffort
             ? { modelParameters: { reasoning_effort: turn.reasoningEffort } }
             : {}),
@@ -637,7 +691,7 @@ export async function convertRollout(
   const { sessionMeta, turns } = parseSession(await loadSession(rolloutFile));
 
   const historyPrefixes: ChatMlMessage[][] = [];
-  {
+  if (options.config.detail !== "turn") {
     const seen: ChatMlMessage[] = [];
     for (const turn of turns) {
       historyPrefixes.push([...seen]);

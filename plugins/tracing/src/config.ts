@@ -16,6 +16,7 @@ import { z } from "zod";
  */
 export const ConfigSchema = z.object({
   enabled: z.boolean(),
+  detail: z.enum(["turn", "full"]).optional(),
   public_key: z.string().optional(),
   secret_key: z.string().optional(),
   base_url: z.string(),
@@ -33,8 +34,12 @@ export type Config = z.infer<typeof ConfigSchema>;
 
 const PartialConfigSchema = ConfigSchema.partial();
 
-const DEFAULTS: Pick<Config, "enabled" | "base_url" | "skill_tags" | "debug" | "fail_on_error"> = {
+const DEFAULTS: Pick<
+  Config,
+  "enabled" | "detail" | "base_url" | "skill_tags" | "debug" | "fail_on_error"
+> = {
   enabled: false,
+  detail: "full",
   base_url: "https://cloud.langfuse.com",
   skill_tags: true,
   debug: false,
@@ -169,6 +174,7 @@ function readEnvConfig(env: Record<string, string | undefined>): Partial<Config>
       metadata: parseMetadata(env.LANGFUSE_CODEX_METADATA),
       skill_tags: parseBoolean(env.LANGFUSE_CODEX_SKILL_TAGS),
       trace_seed: env.LANGFUSE_CODEX_TRACE_SEED,
+      detail: env.LANGFUSE_CODEX_DETAIL?.trim().toLowerCase(),
       debug: parseBoolean(env.LANGFUSE_CODEX_DEBUG),
       fail_on_error: parseBoolean(env.LANGFUSE_CODEX_FAIL_ON_ERROR),
     }),

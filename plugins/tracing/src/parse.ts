@@ -92,6 +92,54 @@ function extractToolError(payload: EventMsgPayload): string | undefined {
   return undefined;
 }
 
+function toolOutputError(output: unknown): string | undefined {
+  const structured = typeof output === "string" ? parseArgs(output) : output;
+  if (structured && typeof structured === "object" && !Array.isArray(structured)) {
+    const result = structured as Record<string, unknown>;
+    const code = result.exit_code ?? result.exitCode;
+    if (
+      result.is_error === true ||
+      result.isError === true ||
+      (typeof code === "number" && code !== 0)
+    ) {
+      return toText(output);
+    }
+  }
+  const text = toText(output);
+  const code = text.match(
+    /^(?:(?:Chunk ID:|Wall time:)[^\n]*\n)*\s*(?:Exit code:\s*|Process exited with code\s+)(-?\d+)\b/,
+  );
+  return code && Number(code[1]) !== 0 ? text : undefined;
+}
+
+function tokenUsageDelta(
+  total: TokenUsage,
+  before: TokenUsage | undefined,
+): TokenUsage | undefined {
+  const delta: TokenUsage = {};
+  for (const key of [
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "cached_input_tokens",
+    "reasoning_output_tokens",
+  ] as const) {
+    const current = total[key];
+    if (current === undefined || (before && before[key] === undefined)) continue;
+    const previous = before?.[key] ?? 0;
+    if (
+      !Number.isSafeInteger(current) ||
+      !Number.isSafeInteger(previous) ||
+      current < previous ||
+      previous < 0
+    ) {
+      return undefined;
+    }
+    delta[key] = current - previous;
+  }
+  return delta;
+}
+
 type MutableTurn = Turn & { lastAgentMessage?: string; userInputFallback?: string };
 
 const TURN_OPENING_EVENTS = new Set(["user_message", "item_completed", "agent_message"]);
@@ -144,6 +192,9 @@ export function parseSession(lines: RolloutLine[]): {
   let step: ModelStep | null = null;
   let toolCallsById = new Map<string, ToolCall>();
   let lastTimestamp = Date.now();
+  let cumulativeUsage: TokenUsage | undefined;
+  let usageBeforeTurn: TokenUsage | undefined;
+  let usageCountersRegressed = false;
 
   const developerMessages: string[] = [];
   const injectedContext: string[] = [];
@@ -169,11 +220,19 @@ export function parseSession(lines: RolloutLine[]): {
   };
 
   function newStep(startTime: number): ModelStep {
-    return { startTime, endTime: startTime, toolCalls: [] };
+    return { startTime, endTime: startTime, model: turn?.model, toolCalls: [] };
   }
 
-  const ensureTurn = (ts: number): MutableTurn => (turn ??= newTurn(ts));
+  const startTurn = (ts: number): MutableTurn => {
+    usageBeforeTurn = cumulativeUsage;
+    usageCountersRegressed = false;
+    return newTurn(ts);
+  };
+  const ensureTurn = (ts: number): MutableTurn => (turn ??= startTurn(ts));
   const ensureStep = (ts: number) => (step ??= newStep(ts));
+  const recordStepModel = (model: string | undefined) => {
+    if (step && !step.model) step.model = model;
+  };
 
   const recordSubagentThread = (threadId: string) => {
     if (!turn!.subagentThreadIds.includes(threadId)) {
@@ -224,6 +283,7 @@ export function parseSession(lines: RolloutLine[]): {
       const t = ensureTurn(ts);
       const p = line.payload as TurnContextPayload;
       t.model = p.model ?? t.model;
+      recordStepModel(t.model);
       const effort = typeof p.effort === "string" ? p.effort : p.reasoning_effort;
       if (typeof effort === "string") t.reasoningEffort = effort;
       t.invocationParams = line.payload as Record<string, unknown>;
@@ -316,6 +376,7 @@ export function parseSession(lines: RolloutLine[]): {
         const tc = toolCallsById.get(out.call_id);
         if (tc) {
           if (tc.output == null) tc.output = out.output;
+          tc.error ??= toolOutputError(out.output);
           tc.endTime = Math.max(tc.endTime ?? ts, ts);
           if (tc.name === "spawn_agent") {
             const spawned = parseArgs(toText(out.output));
@@ -362,11 +423,15 @@ export function parseSession(lines: RolloutLine[]): {
 
       if (et === "task_started") {
         if (turn) finishTurn(ts, { completed: false, aborted: false });
-        turn = newTurn(ts);
+        turn = startTurn(ts);
         turn.turnId = typeof p.turn_id === "string" ? p.turn_id : undefined;
         continue;
       }
 
+      // Restored counters can arrive between turns and establish the next baseline.
+      if (et === "token_count" && !turn && p.info?.total_token_usage) {
+        cumulativeUsage = p.info.total_token_usage;
+      }
       if (TURN_OPENING_EVENTS.has(et)) ensureTurn(ts);
       else if (!turn) continue;
 
@@ -378,7 +443,16 @@ export function parseSession(lines: RolloutLine[]): {
       } else if (et === "agent_message" && typeof p.message === "string") {
         turn!.lastAgentMessage = p.message;
       } else if (et === "token_count") {
-        if (p.info?.total_token_usage) turn!.totalUsage = p.info.total_token_usage;
+        if (p.info?.total_token_usage) {
+          if (cumulativeUsage && !tokenUsageDelta(p.info.total_token_usage, cumulativeUsage)) {
+            usageCountersRegressed = true;
+          }
+          cumulativeUsage = p.info.total_token_usage;
+          // Codex totals are session-cumulative, not the usage of this turn.
+          turn!.totalUsage = usageCountersRegressed
+            ? undefined
+            : tokenUsageDelta(cumulativeUsage, usageBeforeTurn);
+        }
         closeStep(ts, p.info?.last_token_usage ?? undefined);
       } else if (et === "task_complete") {
         finishTurn(ts, { completed: true, aborted: false });
@@ -419,9 +493,14 @@ export function parseSession(lines: RolloutLine[]): {
           const tc = toolCallsById.get(p.call_id);
           if (tc) {
             tc.endTime = Math.max(tc.endTime ?? ts, ts);
-            if (p.status === "failed" || p.status === "declined") {
-              tc.error = extractToolError(p);
+            if (
+              p.status === "failed" ||
+              p.status === "declined" ||
+              (typeof p.exit_code === "number" && p.exit_code !== 0)
+            ) {
+              tc.error = extractToolError(p) ?? tc.error ?? "Tool failed";
             }
+            tc.error ??= toolOutputError(p.result);
             if (tc.output == null) {
               tc.output = p.aggregated_output ?? p.stdout ?? (p as { result?: unknown }).result;
             }

@@ -86,6 +86,241 @@ beforeEach(() => {
 });
 
 describe("convertRollout", () => {
+  it("turn mode keeps one observation with counts, usage and bounded tool errors", async () => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-basic-main.jsonl");
+    const rows = fs
+      .readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const end = rows.find((row) => row.payload.type === "exec_command_end");
+    // Codex reports a completed tool invocation even when its command exits nonzero.
+    end.payload.status = "completed";
+    end.payload.exit_code = 1;
+    end.payload.aggregated_output = "command failed ".repeat(100);
+    // A later status-only event must not overwrite the earlier diagnostic.
+    rows.splice(rows.indexOf(end) + 1, 0, {
+      ...end,
+      payload: {
+        type: "exec_command_end",
+        call_id: end.payload.call_id,
+        status: "failed",
+      },
+    });
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));
+    const config = { ...baseConfig, detail: "turn" as const };
+    await convertAndMark(file, { config });
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    const root = spans[0];
+    expect(attr(root, "langfuse.observation.input")).toContain("List the files");
+    expect(attr(root, "langfuse.observation.output")).toContain("two files");
+    const summary = JSON.parse(attr(root, "langfuse.observation.metadata.telemetry_summary"));
+    expect(summary.version).toBe(1);
+    expect(summary.generation_count).toBe(2);
+    expect(summary.tool_call_count).toBe(1);
+    expect(summary.tool_names).toEqual({ exec_command: 1 });
+    expect(summary.errors).toHaveLength(1);
+    expect(summary.errors[0].status_message).toBe(end.payload.aggregated_output.slice(0, 300));
+    expect(summary.errors[0].name).toBe("exec_command");
+    expect(summary.usage_by_model["gpt-5.4"]).toEqual({
+      input: 250,
+      output: 50,
+      total: 300,
+      cache_read_input_tokens: 50,
+      reasoning_output_tokens: 5,
+    });
+    await convertAndMark(file, { config });
+    expect(exporter.getFinishedSpans()).toHaveLength(1);
+  });
+
+  it("turn mode preserves parent and subagent turn observations", async () => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-parent.jsonl");
+    await convertRollout(file, { config: { ...baseConfig, detail: "turn" } });
+    const spans = exporter.getFinishedSpans();
+    expect(spans.length).toBeGreaterThan(1);
+    expect(spans.every((span) => obsType(span) === "agent")).toBe(true);
+    const child = spans.find((span) => span.name === "Codex Subagent Turn");
+    expect(child).toBeDefined();
+    const parent = spans.find((span) => span.spanContext().spanId === parentId(child!));
+    expect(parent?.name).toBe("Codex Turn");
+    expect(child!.spanContext().traceId).toBe(parent!.spanContext().traceId);
+    for (const span of spans) {
+      expect(
+        JSON.parse(attr(span, "langfuse.observation.metadata.telemetry_summary")).version,
+      ).toBe(1);
+    }
+  });
+
+  it("turn mode falls back to cumulative deltas without counting earlier turns", async () => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-two-turns-main.jsonl");
+    const rows = fs
+      .readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    for (const row of rows) {
+      if (row.payload.type === "token_count") delete row.payload.info.last_token_usage;
+    }
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));
+    await convertRollout(file, { config: { ...baseConfig, detail: "turn" } });
+    const usages = turnRoots().map(
+      (root) =>
+        JSON.parse(attr(root, "langfuse.observation.metadata.telemetry_summary")).usage_by_model,
+    );
+    expect(usages).toEqual([
+      { "gpt-5.4": { input: 20, output: 8, total: 28 } },
+      { "gpt-5.4": { input: 32, output: 8, total: 40 } },
+    ]);
+  });
+
+  it("turn mode uses a restored cumulative baseline before the first turn", async () => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-two-turns-main.jsonl");
+    const rows = fs
+      .readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    rows.splice(1, 0, {
+      timestamp: rows[0].timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: { total_token_usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 } },
+      },
+    });
+    for (const row of rows) {
+      if (row.payload.type !== "token_count" || !row.payload.info.last_token_usage) continue;
+      delete row.payload.info.last_token_usage;
+      row.payload.info.total_token_usage.input_tokens += 100;
+      row.payload.info.total_token_usage.output_tokens += 20;
+      row.payload.info.total_token_usage.total_tokens += 120;
+    }
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));
+    await convertRollout(file, { config: { ...baseConfig, detail: "turn" } });
+    expect(
+      turnRoots().map(
+        (root) =>
+          JSON.parse(attr(root, "langfuse.observation.metadata.telemetry_summary")).usage_by_model[
+            "gpt-5.4"
+          ].total,
+      ),
+    ).toEqual([28, 40]);
+  });
+
+  it("turn mode keeps available step usage without adding the cumulative fallback", async () => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-basic-main.jsonl");
+    const rows = fs
+      .readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const counts = rows.filter((row) => row.payload.type === "token_count");
+    delete counts[0].payload.info.last_token_usage;
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));
+    await convertRollout(file, { config: { ...baseConfig, detail: "turn" } });
+    const summary = JSON.parse(
+      attr(turnRoots()[0], "langfuse.observation.metadata.telemetry_summary"),
+    );
+    expect(summary.usage_by_model["gpt-5.4"].total).toBe(180);
+  });
+
+  it("turn mode leaves aggregate-only mixed-model usage unattributed", async () => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-basic-main.jsonl");
+    const rows = fs
+      .readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const firstCount = rows.find((row) => row.payload.type === "token_count");
+    rows.splice(rows.indexOf(firstCount) + 1, 0, {
+      timestamp: firstCount.timestamp,
+      type: "turn_context",
+      payload: { model: "gpt-5.5" },
+    });
+    for (const row of rows) {
+      if (row.payload.type === "token_count") delete row.payload.info.last_token_usage;
+    }
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));
+    await convertRollout(file, { config: { ...baseConfig, detail: "turn" } });
+    const summary = JSON.parse(
+      attr(turnRoots()[0], "langfuse.observation.metadata.telemetry_summary"),
+    );
+    expect(summary.usage_by_model).toEqual({
+      unknown: {
+        input: 250,
+        output: 50,
+        total: 300,
+        cache_read_input_tokens: 50,
+        reasoning_output_tokens: 5,
+      },
+    });
+  });
+
+  it("turn mode omits cumulative usage when counters regress", async () => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-two-turns-main.jsonl");
+    const rows = fs
+      .readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const counts = rows.filter((row) => row.payload.type === "token_count");
+    for (const row of counts) delete row.payload.info.last_token_usage;
+    counts[1].payload.info.total_token_usage = {
+      input_tokens: 10,
+      output_tokens: 2,
+      total_tokens: 12,
+    };
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));
+    await convertRollout(file, { config: { ...baseConfig, detail: "turn" } });
+    const summary = JSON.parse(
+      attr(turnRoots()[1], "langfuse.observation.metadata.telemetry_summary"),
+    );
+    expect(summary.usage_by_model).toEqual({});
+  });
+
+  it.each([
+    { input_tokens: 30, output_tokens: 10, total_tokens: 40 },
+    { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
+  ])("turn mode does not recover aggregate usage after a counter decrease: %j", async (lower) => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-two-turns-main.jsonl");
+    const rows = fs
+      .readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const counts = rows.filter((row) => row.payload.type === "token_count");
+    for (const row of counts) delete row.payload.info.last_token_usage;
+    const lastCount = counts[1];
+    rows.splice(
+      rows.indexOf(lastCount),
+      0,
+      ...[{ input_tokens: 50, output_tokens: 18, total_tokens: 68 }, lower].map((total) => ({
+        ...lastCount,
+        payload: { type: "token_count", info: { total_token_usage: total } },
+      })),
+    );
+    lastCount.payload.info.total_token_usage = {
+      input_tokens: 80,
+      output_tokens: 20,
+      total_tokens: 100,
+    };
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));
+    await convertRollout(file, { config: { ...baseConfig, detail: "turn" } });
+    const summary = JSON.parse(
+      attr(turnRoots()[1], "langfuse.observation.metadata.telemetry_summary"),
+    );
+    expect(summary.usage_by_model).toEqual({});
+  });
+
   it("emits an agent → generation → tool tree with backdated timestamps", async () => {
     const dir = stageFixtures();
     await convertRollout(path.join(dir, "rollout-basic-main.jsonl"), { config: baseConfig });

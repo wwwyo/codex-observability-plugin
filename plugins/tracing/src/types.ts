@@ -194,6 +194,7 @@ export type ToolCall = {
 export type ModelStep = {
   startTime: number;
   endTime: number;
+  model?: string;
   reasoning?: string;
   text?: string;
   toolCalls: ToolCall[];
@@ -214,6 +215,7 @@ export type Turn = {
   promptSkills: string[];
   completed: boolean;
   aborted: boolean;
+  /** Turn-local delta of the session's cumulative token counters. */
   totalUsage?: TokenUsage;
   systemPrompt?: SystemPrompt;
   userImages: string[];

@@ -1,5 +1,12 @@
 # Langfuse Codex Plugin
 
+This repository is [wwwyo's fork](https://github.com/wwwyo/codex-observability-plugin)
+of [langfuse/codex-observability-plugin](https://github.com/langfuse/codex-observability-plugin).
+It contains custom compact turn tracing and tool-error handling changes for personal
+use; these changes are not part of the upstream release. The marketplace metadata
+still refers to the official npm package, so using this fork's changes requires
+building its source rather than installing that package.
+
 Codex plugin that sends OpenAI Codex session telemetry to Langfuse. It traces agent turns, model generations, reasoning summaries, system prompts, tool calls, images, subagent threads, skills, and token usage.
 
 Langfuse also documents this integration on the [Codex integration page](https://langfuse.com/integrations/developer-tools/codex).
@@ -65,10 +72,30 @@ The remaining options are settable both ways, as a `langfuse.json` key or as the
 - `metadata` attaches a JSON object to every trace.
 - `skill_tags` tags traces with `skill:<name>` for every skill invoked in the turn, and defaults to `true`.
 - `trace_seed` derives deterministic trace ids, so a headless caller knows a run's trace id up front. Use a unique seed per session.
+- `detail` selects `full` (default) or `turn`, with `LANGFUSE_CODEX_DETAIL` as the environment override.
 - `debug` logs verbosely to stderr, and defaults to `false`.
 - `fail_on_error` fails the hook on upload errors instead of failing open, and defaults to `false`.
 
 Everything the plugin traces is uploaded to Langfuse, including prompts and tool inputs and outputs, so do not enable it for sessions containing data you do not want stored there.
+
+### Turn detail
+
+Set `"detail": "turn"` in `~/.codex/langfuse.json` (without `enabled`) to
+use one observation per turn while preserving per-project opt-in. Override with
+`"detail": "full"` per project, or `LANGFUSE_CODEX_DETAIL=full`, for individual
+model and tool observations.
+
+Turn mode preserves the user input and final response, turn timing, context,
+subagent turns, and a versioned `telemetry_summary` JSON value in turn metadata.
+The summary contains generation/tool counts, tool names, bounded tool error
+messages and times, and token usage grouped by model. It excludes full tool
+input/output bodies and intermediate model responses. Failure diagnostics can
+include up to 300 characters of tool output; turn mode reduces volume rather than
+redacting sensitive content. If no model step has valid usage, the summary falls
+back to the turn's delta of cumulative session counters. Aggregate-only usage
+from a mixed-model turn is recorded under `unknown` rather than attributed to a
+single model. Standard token/cost dashboards, tool-error filtering, and individual
+generation latency views require full mode. Previously uploaded turns are not replayed.
 
 ## Contributing
 
