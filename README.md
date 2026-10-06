@@ -81,9 +81,11 @@ model and tool observations.
 Turn mode preserves the user input and final response, turn timing, context,
 subagent turns, and a versioned `telemetry_summary` JSON value in turn metadata.
 The summary contains generation/tool counts, tool names, bounded tool error
-messages and times, and token usage grouped by model. It does not contain tool
-input/output bodies or intermediate model responses. Individual generation cost
-and latency views require full mode. Previously uploaded turns are not replayed.
+messages and times, and token usage grouped by model. It excludes full tool
+input/output bodies and intermediate model responses. Failure diagnostics can
+include up to 300 characters of tool output; turn mode reduces volume rather than
+redacting sensitive content. Individual generation cost and latency views require
+full mode. Previously uploaded turns are not replayed.
 
 ## Contributing
 

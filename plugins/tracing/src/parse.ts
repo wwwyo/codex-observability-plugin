@@ -449,7 +449,7 @@ export function parseSession(lines: RolloutLine[]): {
               p.status === "declined" ||
               (typeof p.exit_code === "number" && p.exit_code !== 0)
             ) {
-              tc.error = extractToolError(p) ?? "Tool failed";
+              tc.error = extractToolError(p) ?? tc.error ?? "Tool failed";
             }
             tc.error ??= toolOutputError(p.result);
             if (tc.output == null) {

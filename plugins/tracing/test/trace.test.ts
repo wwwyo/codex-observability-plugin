@@ -99,6 +99,15 @@ describe("convertRollout", () => {
     end.payload.status = "completed";
     end.payload.exit_code = 1;
     end.payload.aggregated_output = "command failed ".repeat(100);
+    // A later status-only event must not overwrite the earlier diagnostic.
+    rows.splice(rows.indexOf(end) + 1, 0, {
+      ...end,
+      payload: {
+        type: "exec_command_end",
+        call_id: end.payload.call_id,
+        status: "failed",
+      },
+    });
     fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));
     const config = { ...baseConfig, detail: "turn" as const };
     await convertAndMark(file, { config });
@@ -113,7 +122,7 @@ describe("convertRollout", () => {
     expect(summary.tool_call_count).toBe(1);
     expect(summary.tool_names).toEqual({ exec_command: 1 });
     expect(summary.errors).toHaveLength(1);
-    expect(summary.errors[0].status_message).toHaveLength(300);
+    expect(summary.errors[0].status_message).toBe(end.payload.aggregated_output.slice(0, 300));
     expect(summary.errors[0].name).toBe("exec_command");
     expect(summary.usage_by_model["gpt-5.4"]).toEqual({
       input: 250,
