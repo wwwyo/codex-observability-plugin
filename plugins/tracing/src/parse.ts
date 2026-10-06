@@ -100,15 +100,16 @@ function toolOutputError(output: unknown): string | undefined {
     if (
       result.is_error === true ||
       result.isError === true ||
-      Boolean(result.error) ||
       (typeof code === "number" && code !== 0)
     ) {
       return toText(output);
     }
   }
   const text = toText(output);
-  const codes = text.matchAll(/^\s*(?:Exit code:\s*|Process exited with code\s+)(-?\d+)\b/gm);
-  return [...codes].some((match) => Number(match[1]) !== 0) ? text : undefined;
+  const code = text.match(
+    /^(?:(?:Chunk ID:|Wall time:)[^\n]*\n)*\s*(?:Exit code:\s*|Process exited with code\s+)(-?\d+)\b/,
+  );
+  return code && Number(code[1]) !== 0 ? text : undefined;
 }
 
 type MutableTurn = Turn & { lastAgentMessage?: string; userInputFallback?: string };

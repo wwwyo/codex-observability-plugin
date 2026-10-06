@@ -174,7 +174,7 @@ function readEnvConfig(env: Record<string, string | undefined>): Partial<Config>
       metadata: parseMetadata(env.LANGFUSE_CODEX_METADATA),
       skill_tags: parseBoolean(env.LANGFUSE_CODEX_SKILL_TAGS),
       trace_seed: env.LANGFUSE_CODEX_TRACE_SEED,
-      detail: env.LANGFUSE_CODEX_DETAIL,
+      detail: env.LANGFUSE_CODEX_DETAIL?.trim().toLowerCase(),
       debug: parseBoolean(env.LANGFUSE_CODEX_DEBUG),
       fail_on_error: parseBoolean(env.LANGFUSE_CODEX_FAIL_ON_ERROR),
     }),

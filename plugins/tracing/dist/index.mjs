@@ -5316,7 +5316,7 @@ function readEnvConfig(env) {
 		metadata: parseMetadata(env.LANGFUSE_CODEX_METADATA),
 		skill_tags: parseBoolean(env.LANGFUSE_CODEX_SKILL_TAGS),
 		trace_seed: env.LANGFUSE_CODEX_TRACE_SEED,
-		detail: env.LANGFUSE_CODEX_DETAIL,
+		detail: env.LANGFUSE_CODEX_DETAIL?.trim().toLowerCase(),
 		debug: parseBoolean(env.LANGFUSE_CODEX_DEBUG),
 		fail_on_error: parseBoolean(env.LANGFUSE_CODEX_FAIL_ON_ERROR)
 	}));
@@ -34791,10 +34791,11 @@ function toolOutputError(output) {
 	if (structured && typeof structured === "object" && !Array.isArray(structured)) {
 		const result = structured;
 		const code = result.exit_code ?? result.exitCode;
-		if (result.is_error === true || result.isError === true || Boolean(result.error) || typeof code === "number" && code !== 0) return toText(output);
+		if (result.is_error === true || result.isError === true || typeof code === "number" && code !== 0) return toText(output);
 	}
 	const text = toText(output);
-	return [...text.matchAll(/^\s*(?:Exit code:\s*|Process exited with code\s+)(-?\d+)\b/gm)].some((match) => Number(match[1]) !== 0) ? text : void 0;
+	const code = text.match(/^(?:(?:Chunk ID:|Wall time:)[^\n]*\n)*\s*(?:Exit code:\s*|Process exited with code\s+)(-?\d+)\b/);
+	return code && Number(code[1]) !== 0 ? text : void 0;
 }
 const TURN_OPENING_EVENTS = /* @__PURE__ */ new Set([
 	"user_message",
