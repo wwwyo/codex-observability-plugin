@@ -421,6 +421,47 @@ function generationEnd(step: ModelStep): number {
   return Math.max(step.startTime, Math.min(firstToolCall ?? step.endTime, step.endTime));
 }
 
+function turnSummary(turn: Turn) {
+  const tools = turn.steps.flatMap((step) => step.toolCalls);
+  const toolNames: Record<string, number> = Object.create(null);
+  for (const tc of tools) {
+    const name = toolObservationName(tc);
+    toolNames[name] = (toolNames[name] ?? 0) + 1;
+  }
+  const usageByModel: Record<string, Record<string, number>> = Object.create(null);
+  for (const step of turn.steps) {
+    if (!toUsageDetails(step.usage) || !step.usage) continue;
+    const usage = step.usage;
+    const model = turn.model ?? "unknown";
+    const totals = (usageByModel[model] ??= Object.create(null));
+    const fields = {
+      input_tokens: "input",
+      output_tokens: "output",
+      total_tokens: "total",
+      cached_input_tokens: "cache_read_input_tokens",
+      reasoning_output_tokens: "reasoning_output_tokens",
+    };
+    for (const [source, target] of Object.entries(fields)) {
+      const value = usage[source as keyof TokenUsage];
+      if (typeof value === "number") totals[target] = (totals[target] ?? 0) + value;
+    }
+  }
+  return {
+    version: 1,
+    generation_count: turn.steps.length,
+    tool_call_count: tools.length,
+    tool_names: toolNames,
+    errors: tools
+      .filter((tc) => tc.error)
+      .map((tc) => ({
+        name: toolObservationName(tc),
+        status_message: tc.error!.slice(0, 300),
+        start_time: new Date(tc.startTime).toISOString(),
+      })),
+    usage_by_model: usageByModel,
+  };
+}
+
 async function emitTurn(
   turn: Turn,
   sessionMeta: SessionMeta,
@@ -450,6 +491,9 @@ async function emitTurn(
       level: turn.aborted ? "WARNING" : undefined,
       statusMessage: turn.aborted ? "Turn interrupted by user" : undefined,
       metadata: {
+        ...(ctx.config.detail === "turn"
+          ? { telemetry_summary: JSON.stringify(turnSummary(turn)) }
+          : {}),
         "codex.turn_id": turn.turnId,
         "codex.thread_id": sessionMeta.sessionId,
         "codex.model": turn.model,
@@ -484,10 +528,11 @@ async function emitTurn(
 
   let failure: unknown;
   try {
-    const systemMessage = systemPromptText(turn.systemPrompt);
+    const systemMessage =
+      ctx.config.detail === "turn" ? undefined : systemPromptText(turn.systemPrompt);
     const historyPrefix = ctx.historyPrefix ?? [];
 
-    for (let i = 0; i < turn.steps.length; i++) {
+    for (let i = 0; ctx.config.detail !== "turn" && i < turn.steps.length; i++) {
       const step = turn.steps[i];
       const generation = startObservation(
         isSubagent ? "LLM Subagent" : "LLM",
@@ -637,7 +682,7 @@ export async function convertRollout(
   const { sessionMeta, turns } = parseSession(await loadSession(rolloutFile));
 
   const historyPrefixes: ChatMlMessage[][] = [];
-  {
+  if (options.config.detail !== "turn") {
     const seen: ChatMlMessage[] = [];
     for (const turn of turns) {
       historyPrefixes.push([...seen]);

@@ -38,3 +38,6 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Verify installed bundle matches source
+        run: git diff --exit-code -- plugins/tracing/dist/index.mjs

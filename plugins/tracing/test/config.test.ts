@@ -33,6 +33,18 @@ afterEach(() => {
 const emptyHome = () => makeTmpHome();
 
 describe("getConfig", () => {
+  it("inherits global turn detail without opting unconfigured projects in", async () => {
+    const home = makeTmpHome({ rel: ".codex/langfuse.json", contents: { detail: "turn" } });
+    const cwd = makeTmpHome({ rel: ".codex/langfuse.json", contents: { enabled: true } });
+    expect((await getConfig({ home, cwd: emptyHome(), env: {} })).enabled).toBe(false);
+    const local = await getConfig({ home, cwd, env: {} });
+    expect(local.enabled).toBe(true);
+    expect(local.detail).toBe("turn");
+    expect((await getConfig({ home, cwd, env: { LANGFUSE_CODEX_DETAIL: "full" } })).detail).toBe(
+      "full",
+    );
+  });
+
   it("defaults to disabled with EU cloud base URL", async () => {
     const config = await getConfig({ home: emptyHome(), cwd: emptyHome(), env: {} });
     expect(config.enabled).toBe(false);

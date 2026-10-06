@@ -86,6 +86,60 @@ beforeEach(() => {
 });
 
 describe("convertRollout", () => {
+  it("turn mode keeps one observation with counts, usage and bounded tool errors", async () => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-basic-main.jsonl");
+    const rows = fs
+      .readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const end = rows.find((row) => row.payload.type === "exec_command_end");
+    end.payload.status = "failed";
+    end.payload.exit_code = 1;
+    end.payload.aggregated_output = "command failed ".repeat(100);
+    fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));
+    const config = { ...baseConfig, detail: "turn" as const };
+    await convertAndMark(file, { config });
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    const root = spans[0];
+    expect(attr(root, "langfuse.observation.input")).toContain("List the files");
+    expect(attr(root, "langfuse.observation.output")).toContain("two files");
+    const summary = JSON.parse(attr(root, "langfuse.observation.metadata.telemetry_summary"));
+    expect(summary.version).toBe(1);
+    expect(summary.generation_count).toBe(2);
+    expect(summary.tool_call_count).toBe(1);
+    expect(summary.tool_names).toEqual({ exec_command: 1 });
+    expect(summary.errors).toHaveLength(1);
+    expect(summary.errors[0].status_message).toHaveLength(300);
+    expect(summary.errors[0].name).toBe("exec_command");
+    expect(summary.usage_by_model["gpt-5.4"]).toEqual({
+      input: 250,
+      output: 50,
+      total: 300,
+      cache_read_input_tokens: 50,
+      reasoning_output_tokens: 5,
+    });
+    await convertAndMark(file, { config });
+    expect(exporter.getFinishedSpans()).toHaveLength(1);
+  });
+
+  it("turn mode preserves parent and subagent turn observations", async () => {
+    const dir = stageFixtures();
+    const file = path.join(dir, "rollout-parent.jsonl");
+    await convertRollout(file, { config: { ...baseConfig, detail: "turn" } });
+    const spans = exporter.getFinishedSpans();
+    expect(spans.length).toBeGreaterThan(1);
+    expect(spans.every((span) => obsType(span) === "agent")).toBe(true);
+    expect(spans.some((span) => span.name === "Codex Subagent Turn")).toBe(true);
+    for (const span of spans) {
+      expect(
+        JSON.parse(attr(span, "langfuse.observation.metadata.telemetry_summary")).version,
+      ).toBe(1);
+    }
+  });
+
   it("emits an agent → generation → tool tree with backdated timestamps", async () => {
     const dir = stageFixtures();
     await convertRollout(path.join(dir, "rollout-basic-main.jsonl"), { config: baseConfig });
