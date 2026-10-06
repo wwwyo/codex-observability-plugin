@@ -95,7 +95,8 @@ describe("convertRollout", () => {
       .split("\n")
       .map((line) => JSON.parse(line));
     const end = rows.find((row) => row.payload.type === "exec_command_end");
-    end.payload.status = "failed";
+    // Codex reports a completed tool invocation even when its command exits nonzero.
+    end.payload.status = "completed";
     end.payload.exit_code = 1;
     end.payload.aggregated_output = "command failed ".repeat(100);
     fs.writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n"));

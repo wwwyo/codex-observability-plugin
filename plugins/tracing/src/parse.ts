@@ -92,6 +92,25 @@ function extractToolError(payload: EventMsgPayload): string | undefined {
   return undefined;
 }
 
+function toolOutputError(output: unknown): string | undefined {
+  const structured = typeof output === "string" ? parseArgs(output) : output;
+  if (structured && typeof structured === "object" && !Array.isArray(structured)) {
+    const result = structured as Record<string, unknown>;
+    const code = result.exit_code ?? result.exitCode;
+    if (
+      result.is_error === true ||
+      result.isError === true ||
+      Boolean(result.error) ||
+      (typeof code === "number" && code !== 0)
+    ) {
+      return toText(output);
+    }
+  }
+  const text = toText(output);
+  const codes = text.matchAll(/^\s*(?:Exit code:\s*|Process exited with code\s+)(-?\d+)\b/gm);
+  return [...codes].some((match) => Number(match[1]) !== 0) ? text : undefined;
+}
+
 type MutableTurn = Turn & { lastAgentMessage?: string; userInputFallback?: string };
 
 const TURN_OPENING_EVENTS = new Set(["user_message", "item_completed", "agent_message"]);
@@ -316,6 +335,7 @@ export function parseSession(lines: RolloutLine[]): {
         const tc = toolCallsById.get(out.call_id);
         if (tc) {
           if (tc.output == null) tc.output = out.output;
+          tc.error ??= toolOutputError(out.output);
           tc.endTime = Math.max(tc.endTime ?? ts, ts);
           if (tc.name === "spawn_agent") {
             const spawned = parseArgs(toText(out.output));
@@ -419,9 +439,14 @@ export function parseSession(lines: RolloutLine[]): {
           const tc = toolCallsById.get(p.call_id);
           if (tc) {
             tc.endTime = Math.max(tc.endTime ?? ts, ts);
-            if (p.status === "failed" || p.status === "declined") {
-              tc.error = extractToolError(p);
+            if (
+              p.status === "failed" ||
+              p.status === "declined" ||
+              (typeof p.exit_code === "number" && p.exit_code !== 0)
+            ) {
+              tc.error = extractToolError(p) ?? "Tool failed";
             }
+            tc.error ??= toolOutputError(p.result);
             if (tc.output == null) {
               tc.output = p.aggregated_output ?? p.stdout ?? (p as { result?: unknown }).result;
             }
