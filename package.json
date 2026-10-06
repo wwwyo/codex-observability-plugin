@@ -10,15 +10,15 @@
     "tracing",
     "opentelemetry"
   ],
-  "homepage": "https://github.com/langfuse/codex-observability-plugin#readme",
+  "homepage": "https://github.com/wwwyo/codex-observability-plugin#readme",
   "bugs": {
-    "url": "https://github.com/langfuse/codex-observability-plugin/issues"
+    "url": "https://github.com/wwwyo/codex-observability-plugin/issues"
   },
   "license": "MIT",
   "author": "Langfuse",
   "repository": {
     "type": "git",
-    "url": "https://github.com/langfuse/codex-observability-plugin.git"
+    "url": "https://github.com/wwwyo/codex-observability-plugin.git"
   },
   "type": "module",
   "scripts": {

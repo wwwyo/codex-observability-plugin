@@ -10,6 +10,9 @@ debug.log
 
 # Build output
 plugins/tracing/dist/
+# Package documentation copied from the repository root by prepack.
+plugins/tracing/README.md
+plugins/tracing/LICENSE
 
 # Claude Code scratch space; globbed so a later `!` negation works.
 .claude/*
